@@ -36,19 +36,19 @@ let displayValuesOnWave wsModel (waveValues: FData array) (transitions: NonBinar
                 Length = i2 - i1
             }
         )
-
     gaps
     // Create text react elements for each gap
     |> Array.map (fun gap ->
         let waveValue =
-            let wd = waveValues[gap.Start]
-            valToPaddedString wd.Width  wsModel.Radix wd.toInt64
-  
+            match waveValues[gap.Start] with
+            | Data fastDat -> fastDataToPaddedString WaveSimHelpers.Constants.waveLegendMaxChars wsModel.Radix fastDat
+            | Alg _ -> "Error - algebraic data!"
 
         /// Amount of whitespace between two Change transitions minus the crosshatch
-        let availableWidth = (float gap.Length * (singleWaveWidth wsModel)) - 2. * Constants.nonBinaryTransLen
+        let cycleWidth = singleWaveWidth wsModel
+        let availableWidth = (float gap.Length * cycleWidth) - 2. * Constants.nonBinaryTransLen
         /// Required width to display one value
-        let requiredWidth = DrawHelpers.getTextWidthInPixels (waveValue, Constants.valueOnWaveText)
+        let requiredWidth = 1.1 * DrawHelpers.getTextWidthInPixels Constants.valueOnWaveText waveValue
         /// Width of text plus whitespace between a repeat
         let widthWithPadding = 2. * requiredWidth + Constants.valueOnWavePadding
 
@@ -56,14 +56,20 @@ let displayValuesOnWave wsModel (waveValues: FData array) (transitions: NonBinar
         if availableWidth < requiredWidth then
             []
         else
-            let valueText i =
-                text (valueOnWaveProps wsModel i gap.Start widthWithPadding)
-                    [ str waveValue ]
 
             /// Calculate how many times the value can be shown in the space available
-            let repeats = int <| availableWidth / widthWithPadding
+            let repeats =
+                availableWidth / widthWithPadding
+                |> System.Math.Floor
+                |> int
+                |> max 1
 
-            [ 0 .. repeats ]
+            let repeatSpace = (availableWidth - float repeats * requiredWidth) / ((float repeats + 1.) * cycleWidth)
+            let valueText i =
+                text (valueOnWaveProps wsModel i (float gap.Start + repeatSpace) widthWithPadding)
+                    [ str waveValue ]
+
+            [ 0 .. repeats - 1]
             |> List.map valueText
     )
     |> List.concat
@@ -439,21 +445,25 @@ let namesColumn model wsModel dispatch : ReactElement =
 /// and waveRows, as the order of the waves matters here. This is
 /// because the wave viewer is comprised of three columns of many
 /// rows, rather than many rows of three columns.
+/// Return required width of values column in pixels, and list of cloumn react elements.
 let valueRows (wsModel: WaveSimModel) =
+    let valueColWidth, valueColNumChars =
+        valuesColumnSize wsModel
     selectedWaves wsModel
-    |> List.map (fun wave -> getWaveValue wsModel.CurrClkCycle wave, wave.Width)
-    |> List.map (fun (busVal, width) ->
-        match width with
-        | 1 -> $" {busVal}" 
-        | _ -> valToString wsModel.Radix busVal)
+    |> List.map (fun wave -> getWaveValue wsModel.CurrClkCycle wave wave.Width)
+    |> List.map (fun fd ->
+        match fd.Width, fd.Dat with
+        | 1, Word b -> $" {b}" 
+        | _ -> fastDataToPaddedString valueColNumChars wsModel.Radix fd)
     |> List.map (fun value -> label [ valueLabelStyle ] [ str value ])
+    |> (fun rows -> valueColWidth, rows)
 
 /// Create column of waveform values
 let private valuesColumn wsModel : ReactElement =
     let start = TimeHelpers.getTimeMs ()
-    let rows = valueRows wsModel
+    let width, rows = valueRows wsModel
 
-    div [ valuesColumnStyle ]
+    div [ valuesColumnStyle width]
         (List.concat [ topRow; rows ])
     |> TimeHelpers.instrumentInterval "valuesColumn" start
 
@@ -477,14 +487,17 @@ let waveformColumn (wsModel: WaveSimModel) dispatch : ReactElement =
     /// and valueRows, as the order of the waves matters here. This is
     /// because the wave viewer is comprised of three columns of many
     /// rows, rather than many rows of three columns.
+    let waves = selectedWaves wsModel
+    if List.exists (fun wave -> wave.SVG = None) waves then
+        dispatch <| GenerateCurrentWaveforms
     let waveRows : ReactElement list =
-        selectedWaves wsModel
+        waves
         |> List.map (fun wave ->
             match wave.SVG with
             | Some waveform ->
                 waveform
             | None ->
-                div [] []
+                div [] [] // the GenerateCurrentWaveforms message will soon update this
         )
 
     div [ waveformColumnStyle ]
@@ -706,7 +719,7 @@ let makeWaveformsWithTimeOut
     let start = TimeHelpers.getTimeMs()
     let allWaves, numberDone, timeToDo =
         ((allWaves, 0, None), wavesToBeMade)
-        ||> List.fold (fun (all,n, timeOpt) wi ->
+        ||> List.fold (fun (all,n, _) wi ->
                 match timeOut, TimeHelpers.getTimeMs() - start with
                 | Some timeOut, timeSoFar when timeOut < timeSoFar ->
                     all, n, Some timeSoFar
@@ -735,10 +748,10 @@ let cancelSpinner (model:Model) =
 /// Note that after design change simulation muts be redonne externally, and function called with
 /// newSimulation = true.
 /// First extend simulation, if needed, with timeout and callback from Spinner if needed.
-/// Then remake any waveforms which have chnaged and not yte been remade. Again if needed with
+/// Then remake any waveforms which have changed and not yet been remade. Again if needed with
 /// timeOut and callback from Spinner.
 /// Spinner (in reality a progress bar) is used if the estimated time to completion is longer than
-/// a constant. To get the estimate some initila execution must be completed (1 clock cycle and one waveform).
+/// a constant. To get the estimate some initial execution must be completed (1 clock cycle and one waveform).
 let rec refreshWaveSim (newSimulation: bool) (wsModel: WaveSimModel) (model: Model): Model * Elmish.Cmd<Msg> = 
     let isSameWave (wi:WaveIndexT) (wi': WaveIndexT) =
         wi.Id = wi'.Id && wi.PortNumber = wi'.PortNumber && wi.PortType = wi'.PortType
@@ -750,9 +763,8 @@ let rec refreshWaveSim (newSimulation: bool) (wsModel: WaveSimModel) (model: Mod
         model, Elmish.Cmd.none
     else
     // starting runSimulation
-        printfn "Starting refresh"
-        let lastCycleNeeded = wsModel.StartCycle + wsModel.ShownCycles+1
-        //printfn $"Running fs: {fs.ClockTick} --> {lastCycleNeeded}"
+        //printfn "Starting refresh"
+        let lastCycleNeeded = wsModel.StartCycle + wsModel.ShownCycles + 1
 
         FastRun.runFastSimulation (Some Constants.initSimulationTime) lastCycleNeeded fs
         |> (fun speedOpt ->
@@ -763,12 +775,12 @@ let rec refreshWaveSim (newSimulation: bool) (wsModel: WaveSimModel) (model: Mod
                 // long simulation, set spinner on and dispatch another refresh 
                 let spinnerFunc = fun model -> fst (refreshWaveSim newSimulation wsModel model)
                 let model = model |> updateSpinner "Waveforms simulation..." spinnerFunc cyclesToDo
-                printfn "ending refresh with continuation..."
+                //printfn "ending refresh with continuation..."
                 model, Elmish.Cmd.none
                 |> TimeHelpers.instrumentInterval "refreshWaveSim" start
             | _ ->
                 if speedOpt <> None then 
-                    printfn "Force running simulation"
+                    //printfn "Force running simulation"
                     // force simulation to finish now
                     FastRun.runFastSimulation None lastCycleNeeded fs |> ignore                
                 // simulation has finished so can generate waves
@@ -883,7 +895,7 @@ let refreshButtonAction canvasState model dispatch = fun _ ->
         |> fun model -> {model with WaveSimSheet = Some wsSheet}
     let wsModel = getWSModel model
     //printfn $"simSheet={wsSheet}, wsModel sheet = {wsModel.TopSheet},{wsModel.FastSim.SimulatedTopSheet}, state={wsModel.State}"
-    match SimulationView.simulateModel model.WaveSimSheet (WaveSimHelpers.Constants.maxLastClk + 1)  canvasState model with
+    match SimulationView.simulateModel model.WaveSimSheet (WaveSimHelpers.Constants.maxLastClk + WaveSimHelpers.Constants.maxStepsOverflow)  canvasState model with
     //| None ->
     //    dispatch <| SetWSModel { wsModel with State = NoProject; FastSim = FastCreate.emptyFastSimulation "" }
     | (Error e, _) ->
@@ -925,15 +937,15 @@ let topHalf canvasState (model: Model) dispatch : ReactElement =
                 div [] 
                     (if model.WaveSimSheet <> None then 
                         [
-                            str "View clocked logic waveforms by selecting waves. "
-                            str "Select RAMs or ROMs to view contents during the simulation. "
+                            str "Use 'Select Waves' to select and add clocked logic waveforms. "
+                            str "Use 'Select RAM' to view RAM or ROM contents during the simulation. "
                             str "View or change any sheet with the simulation running. "
                             str "After design changes use "
-                            refreshSvg "black" "12px"
+                            refreshSvg "green" "12px"
                             str " to update waveforms."
                         ] else
                         [
-                            str "Use 'Start Simulation' button to simulate current sheet."
+                            str "Use 'Start Simulation' button to simulate the current sheet. "
                             str "Drag the grey divider to change the Viewer width."
                         ])
                 ]

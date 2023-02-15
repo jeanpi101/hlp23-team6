@@ -27,6 +27,7 @@ module Constants =
     let gatePortPosEdgeGap = 0.3
     let legendVertOffset = 5.
     let legendLineSpacingInPixels = 16.
+    let testShowLabelBoundingBoxes = false
 
     /// How large are component labels
     let labelFontSizeInPixels:float = 16 // otehr parameters scale correctly with this
@@ -37,7 +38,7 @@ module Constants =
         {defaultText with 
             TextAnchor = "start"; 
             FontSize = $"%.0f{labelFontSizeInPixels}px"; 
-            FontFamily = "helvetica"; 
+            FontFamily = "Times"; 
             FontWeight="600"}
 
     /// Style used by bus select bit legends
@@ -49,8 +50,10 @@ module Constants =
             FontWeight="600"}
 
     /// Offset between label position and symbol. This is also used as a margin for the label bounding box.
-    let componentLabelOffsetDistance: float = 7. // offset from symbol outline, otehr parameters scale correctly
-    let thinComponentLabelOffsetDistance: float = 3.
+    let componentLabelOffsetDistance: float =  // offset from symbol outline, otehr parameters scale correctly
+        if testShowLabelBoundingBoxes then 0. else 7.
+    let thinComponentLabelOffsetDistance: float = 
+        if testShowLabelBoundingBoxes then 0. else 3.
     
     /// Height of label text - used to determine where to print labels
     let componentLabelHeight: float = labelFontSizeInPixels
@@ -230,7 +233,7 @@ let calcLabelBoundingBox (sym: Symbol) =
         | _ -> Constants.componentLabelOffsetDistance
     let labH = Constants.componentLabelHeight //height of label text
     //let labW = getMonospaceWidth textStyle.FontSize comp.Label
-    let labW = getTextWidthInPixels(comp.Label,textStyle)// width of label text
+    let labW = getTextWidthInPixels textStyle comp.Label// width of label text
     let boxTopLeft =
         match labelRotation with 
         | Degree0 -> {X = centre.X - labW/2. - margin; Y = comp.Y - labH - 2.*margin }
@@ -350,10 +353,10 @@ let getComponentLegend (componentType:ComponentType) (rotation:Rotation) =
 let portNames (componentType:ComponentType)  = //(input port names, output port names)
     match componentType with
     | Decode4 -> (["SEL";"DATA"]@["0"; "1";"2"; "3"])
-    | NbitsAdder _ -> (["Cin";"P";"Q"]@["SUM "; "COUT"])
+    | NbitsAdder _ -> (["CIN";"P";"Q"]@["SUM "; "COUT"])
     | NbitsAdderNoCin _ -> (["P";"Q"]@["SUM "; "COUT"])
     | NbitsAdderNoCinCout _ -> (["P";"Q"]@["SUM "])
-    | NbitsAdderNoCout _ -> (["Cin";"P";"Q"]@["SUM "])
+    | NbitsAdderNoCout _ -> (["CIN";"P";"Q"]@["SUM "])
     | Register _ -> (["D"]@["Q"])
     | RegisterE _ -> (["D"; "EN"]@["Q"])
     | Counter _ -> (["D"; "LOAD"; "EN"]@["Q"])
@@ -371,7 +374,7 @@ let portNames (componentType:ComponentType)  = //(input port names, output port 
     | Demux2 -> (["DATA" ; "SEL"]@["0"; "1"])
     | Demux4 -> (["DATA"; "SEL"]@["0"; "1";"2"; "3";])
     | Demux8 -> (["DATA"; "SEL"]@["0"; "1"; "2" ; "3" ; "4" ; "5" ; "6" ; "7"])
-    | NbitsXor _ | NbitsAnd _ -> (["P"; "Q"]@ ["OUT"])
+    | NbitsXor _ | NbitsAnd _ | NbitsOr _ -> (["P"; "Q"]@ ["OUT"])
     | NbitsNot _ -> (["IN"]@["OUT"])
     | Shift _ -> (["IN" ; "SHIFTER"]@["OUT"])
     | Custom x -> (List.map fst x.InputLabels)@ (List.map fst x.OutputLabels)

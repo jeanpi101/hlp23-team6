@@ -61,7 +61,7 @@ let getInputPortName (compType: ComponentType) (port: InputPortNumber) : string 
 
     | NbitsAdder _ |NbitsAdderNoCout _ ->
         match port with
-        | InputPortNumber 0 -> ".Cin"
+        | InputPortNumber 0 -> ".CIN"
         | InputPortNumber 1 -> ".P"
         | _ -> ".Q"
 
@@ -406,7 +406,7 @@ let searchBar (wsModel: WaveSimModel) (dispatch: Msg -> unit) : ReactElement =
                     Float FloatOptions.Left
                 ]
             ]
-            Input.Option.Placeholder "Viewer Name"
+            Input.Option.Placeholder "Search string"
             Input.Option.OnChange (fun c ->
                 dispatch <| UpdateWSModel (fun ws -> {wsModel with SearchString = c.Value.ToUpper()})
             )

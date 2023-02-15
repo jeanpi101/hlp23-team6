@@ -32,18 +32,27 @@ module Constants =
     let lineThickness : float = 0.8
     let columnFontSize = "12px"
     let columnFontFamily = "Helvetica"
+    let valueColumnFontSize = "12px"
+    let valueColumnFontFamily = "Helvetica"
+
+    let valueColumnText = 
+        { DrawHelpers.defaultText with 
+            FontSize = valueColumnFontSize
+            FontFamily = valueColumnFontFamily}
 
     let fontSizeValueOnWave = "10px"
     /// Text used to display vlaues on non-binary waves
     let valueOnWaveText = { DrawHelpers.defaultText with FontSize = fontSizeValueOnWave }
     /// Whitespace padding between repeated values displayed on non-binary waves.
-    let valueOnWavePadding = 150.0
+    let valueOnWavePadding = 75.0
 
     /// Border between columns and headers of waveform viewer.
     let borderProperties = "2px solid rgb(219,219,219)"
 
     /// Padding between name label/value label and waveform column.
     let labelPadding = 3
+    /// Color for cursor and values column
+    let cursorColor = "Lavender"
 
 
 
@@ -253,7 +262,7 @@ let zoomInSVG =
 
 /// Props for displaying values on non-binary waves
 let valueOnWaveProps m i start width : IProp list = [
-    X (float start * (singleWaveWidth m) + Constants.nonBinaryTransLen + float i * width)
+    X (start * (singleWaveWidth m) + Constants.nonBinaryTransLen + float i * width)
     Y (0.6 * Constants.viewBoxHeight)
     Style [
         FontSize Constants.fontSizeValueOnWave
@@ -347,11 +356,14 @@ let nameLabelStyle isHovered = Style [
 ]
 
 /// Style for value label
-let valueLabelStyle = Style [
-    Height Constants.rowHeight
-    BorderBottom "1px solid rgb(219,219,219)"
-    PaddingLeft Constants.labelPadding
-]
+let valueLabelStyle = 
+    Style [
+        Height Constants.rowHeight
+        BorderBottom "1px solid rgb(219,219,219)"
+        PaddingLeft Constants.labelPadding
+        FontFamily Constants.valueColumnFontFamily
+        FontSize Constants.valueColumnFontSize
+    ]
 
 /// Prop for Level.left in name row.
 let nameRowLevelLeftProps (visibility: string): IHTMLProp list = [
@@ -392,8 +404,8 @@ let waveSimColumn = [
     BorderTop Constants.borderProperties
     Display DisplayOptions.Grid
     GridAutoRows Constants.rowHeight
-    FontSize Constants.columnFontSize
-    FontFamily Constants.columnFontFamily
+    FontSize Constants.valueColumnFontSize
+    FontFamily Constants.valueColumnFontFamily
     OverflowX OverflowOptions.Auto
     WhiteSpace WhiteSpaceOptions.Nowrap
     LineHeight "25px"
@@ -404,6 +416,7 @@ let namesColumnStyle (ws:WaveSimModel) = Style (
     (waveSimColumn) @ [
         MinWidth (calcNamesColWidth ws)
         Float FloatOptions.Left
+        BackgroundColor Constants.cursorColor
         BorderRight Constants.borderProperties
         GridColumnStart 1
         OverflowX OverflowOptions.Clip
@@ -417,15 +430,43 @@ let namesColumnProps (ws:WaveSimModel): IHTMLProp list = [
     namesColumnStyle ws
 ]
 
+let valuesColumnSize wsModel =
+    let selWaves = selectedWaves wsModel
+    let maxValueBusWidth: int =
+        selWaves
+        |> List.map (fun wave -> wave.Width)
+        |> (fun lis -> 0 :: lis)
+        |> List.max
+    let sampleVals = 
+        [maxValueBusWidth; min maxValueBusWidth NumberHelpers.Constants.maxBinaryDisplayWidth]
+        |> List.map (fun num -> 
+                        let worstCaseVal, extra =
+                            match wsModel.Radix with
+                            | CommonTypes.Hex | CommonTypes.Bin -> 0I, 2.
+                            | CommonTypes.Dec -> SimulatorTypes.bigIntMask (num+1), 2.
+                            | CommonTypes.SDec -> SimulatorTypes.bigIntMask (num-1), 10.
+                        let (fd: SimulatorTypes.FastData) = {Dat=SimulatorTypes.BigWord worstCaseVal; Width=num}
+                        NumberHelpers.fastDataToPaddedString 10000 wsModel.Radix fd
+                        |> (fun s -> s[0..min (s.Length-1) Constants.valueColumnMaxChars])
+                        |> (fun v -> extra + DrawHelpers.getTextWidthInPixels Constants.valueColumnText v, v.Length+2))
+    sampleVals
+    |> List.unzip
+    |> (fun (ws,nums) -> List.max ws, List.max nums)
+    |> (fun (w,num) -> int w + 20, num)
+
 /// Style properties for values column
-let valuesColumnStyle = Style (
+let valuesColumnStyle (colWidth:int) = Style (
     (waveSimColumn) @ [
-        MinWidth Constants.valuesColWidth
+        MinWidth colWidth
         Float FloatOptions.Left
         BorderLeft Constants.borderProperties
         OverflowX OverflowOptions.Auto
+        BackgroundColor Constants.cursorColor
+        Opacity 1.0
         GridColumnStart 3
     ])
+
+
 
 /// Style for waveforms column
 let waveformColumnStyle = Style [
@@ -542,7 +583,7 @@ let clkCycleHighlightSVG m dispatch =
         ]
         SVGAttr.Height (string ((count + 1) * Constants.rowHeight) + "px")
         SVGAttr.Width (viewBoxWidth m)
-        SVGAttr.Fill "rgb(230,230,230)"
+        SVGAttr.Fill Constants.cursorColor
         SVGAttr.Opacity 0.4
         ViewBox (viewBoxMinX m + " 0 " + viewBoxWidth m  + " " + string (Constants.viewBoxHeight * float (count + 1)))
         Id "ClkCycleHighlight"
@@ -658,6 +699,8 @@ let refreshSvg (color:string) (height:string)=
                 14.31-32 32-32S496 30.31 496 48z"
                 Style [
                     Fill color
+                    Stroke color
+                    StrokeWidth "5px"
                 ]
             ] []
         ]
@@ -675,13 +718,13 @@ let inline updateViewerWidthInWaveSim w (model:Model) =
     let wsModel = getWSModel model
     //dispatch <| SetViewerWidth w
     let namesColWidth = calcNamesColWidth wsModel
-    printfn $"Updating viewer namesWith = {namesColWidth}"
 
     /// The +4 is probably because of some unnacounted for padding etc (there is a weird 2px spacer to right of the divider)
     let otherDivWidths = Constants.leftMargin + Constants.rightMargin + DiagramStyle.Constants.dividerBarWidth + Constants.scrollBarWidth + 2
 
     /// This is what the overall waveform width must be
-    let waveColWidth = w - otherDivWidths - namesColWidth - Constants.valuesColWidth
+    let valuesColumnWidth,_ = valuesColumnSize wsModel
+    let waveColWidth = w - otherDivWidths - namesColWidth - valuesColumnWidth
 
     /// Require at least one visible clock cycle: otherwise choose number to get close to correct width of 1 cycle
     let wholeCycles = max 1 (int (float waveColWidth / singleWaveWidth wsModel))
@@ -690,7 +733,6 @@ let inline updateViewerWidthInWaveSim w (model:Model) =
     let singleCycleWidth = float waveColWidth / float wholeCycles
 
     let viewerWidth = namesColWidth + Constants.valuesColWidth + int (singleCycleWidth * float wholeCycles) + otherDivWidths
-
     let updateFn wsModel = 
         {
         wsModel with

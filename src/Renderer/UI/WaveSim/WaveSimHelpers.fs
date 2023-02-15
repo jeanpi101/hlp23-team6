@@ -22,7 +22,7 @@ module Constants =
     /// max estimated time to run simulation and not need a spinner (in ms)
     let maxSimulationTimeWithoutSpinner = 200.
     /// The horizontal length of a transition cross-hatch for non-binary waveforms
-    let nonBinaryTransLen : float = 8.
+    let nonBinaryTransLen : float = 2.
 
     /// The height of the viewbox used for a wave's SVG. This is the same as the height
     /// of a label in the name and value columns.
@@ -41,6 +41,8 @@ module Constants =
 
     /// TODO: Remove this limit, after making simulation interruptable This stops the waveform simulator moving past 1000 clock cycles.
     let maxLastClk = 1000
+    /// Needed to prevent possible overrun of simulation arrays
+    let maxStepsOverflow = 3
 
     /// minium number of cycles on screen when zooming in
     let minVisibleCycles = 3
@@ -63,6 +65,10 @@ module Constants =
     let outOfDateMessage = "Use refresh button to update waveforms. 'End' and then 'Start' to simulate a different sheet"
 
     let infoSignUnicode = "\U0001F6C8"
+
+    let waveLegendMaxChars = 35
+    let valueColumnMaxChars = 35
+
 
 
 //-----------------------------List & Map utilities to deal with exceptions------------------------------------------//
@@ -154,7 +160,10 @@ let endCycle wsModel = wsModel.StartCycle + (wsModel.ShownCycles) - 1
 let button options func label = Button.button (List.append options [ Button.OnClick func ]) [ label ]
 
 /// List of selected waves (of type Wave)
-let selectedWaves (wsModel: WaveSimModel) : Wave list = List.map (fun index -> wsModel.AllWaves[index]) wsModel.SelectedWaves
+let selectedWaves (wsModel: WaveSimModel) : Wave list = 
+    wsModel.SelectedWaves
+    |> List.map (fun wi -> Map.tryFind wi wsModel.AllWaves |> Option.toList)
+    |> List.concat
 
 /// Convert XYPos list to string
 let pointsToString (points: XYPos array) : string =
@@ -163,16 +172,16 @@ let pointsToString (points: XYPos array) : string =
     ) "" points
 
 /// Retrieve value of wave at given clock cycle as an int.
-let getWaveValue (currClkCycle: int) (wave: Wave): int64 =
+let getWaveValue (currClkCycle: int) (wave: Wave) (width: int) : FastData =
     Array.tryItem currClkCycle wave.WaveValues.Step
     |> function
-        | Some (Data fData) ->
-            convertFastDataToInt64 fData |> int64
+        | Some (Data fData) -> 
+            fData            
         | _ ->
             // TODO: Find better default value here
             // TODO: Should probably make it so that you can't call this function in the first place.
             printf "Trying to access index %A in wave %A. Default to 0." currClkCycle wave.DisplayName
-            0
+            {Dat = Word 0u; Width = width}
 
 /// Make left and right x-coordinates for a clock cycle.
 let makeXCoords (clkCycleWidth: float) (clkCycle: int) (transition: Transition) =
