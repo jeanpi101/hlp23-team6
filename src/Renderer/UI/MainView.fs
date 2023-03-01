@@ -379,7 +379,7 @@ let displayView model dispatch =
         FileMenuView.viewTopMenu model dispatch
 
         if model.PopupDialogData.Progress = None then
-            SheetDisplay.view model.Sheet headerHeight (canvasVisibleStyleList model) sheetDispatch
+            Sheet.view model.Sheet headerHeight (canvasVisibleStyleList model) sheetDispatch
         
         // transient pop-ups
         Notifications.viewNotifications model dispatch
