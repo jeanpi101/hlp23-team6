@@ -1104,11 +1104,12 @@ let update (msg : Msg) (model : Model): Model*Cmd<Msg> =
         validateTwoSelectedSymbols model
          |> function 
             | Some (s1, s2) -> 
-                model, Cmd.batch [ 
+                {model with UndoList = model.UndoList @ [model]}, Cmd.batch [ 
+                                        (Cmd.ofMsg (TestPortPosition))
                                         (Cmd.ofMsg (KeyPress CtrlR)) 
                                         (Cmd.ofMsg (FormSmartChannel orientation))]
             | None -> 
-                model, Cmd.batch [ 
+                {model with UndoList = model.UndoList @ [model]}, Cmd.batch [ 
                                         (Cmd.ofMsg (KeyPress CtrlT)) 
                                         (Cmd.ofMsg (FormSmartChannel orientation))]
         
